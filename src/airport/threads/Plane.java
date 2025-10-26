@@ -29,11 +29,12 @@ public class Plane extends Thread {
     private final SupplyCrew[] supplyCrews;
     private final int planeNumber;
     private final EmbarkPassenger embarkPassenger;
-    private final DisembarkPassenger disembarkPassenger; // Add this field
+    private final DisembarkPassenger disembarkPassenger;
     private final Random random;
     private boolean isEmergency;
     private long landingRequestTime;
     private long takeoffRequestTime;
+    private final Object atcLock;  // Dedicated lock for ATC coordination
 
     public Plane(int number, AirTrafficControl atc, Runway runway, 
                 RefuellingTruck refuellingTruck, 
@@ -47,10 +48,11 @@ public class Plane extends Thread {
         this.refuellingTruck = refuellingTruck;
         this.cleaningCrews = cleaningCrews;
         this.supplyCrews = supplyCrews;
-        this.embarkPassenger = embarkPassenger; // Store reference to external passenger group
-        this.disembarkPassenger = new DisembarkPassenger(getName()); // Create disembark thread in constructor
+        this.embarkPassenger = embarkPassenger;
+        this.disembarkPassenger = new DisembarkPassenger(getName());
         this.random = new Random();
         this.isEmergency = false;
+        this.atcLock = new Object();  // Create dedicated lock object
         
         // Set priority based on plane number (Plane-5 gets highest emergency)
         if (number == 5) {
@@ -66,7 +68,7 @@ public class Plane extends Thread {
     public void run() {
         try {
             // Wait based on plane number to ensure sequential arrival
-            Thread.sleep(planeNumber * 1000); // 1 second delay per plane number
+//            Thread.sleep(planeNumber * 1000); // 1 second delay per plane number
             
             // Request landing
             requestLanding();
@@ -85,11 +87,11 @@ public class Plane extends Thread {
     private void requestLanding() throws InterruptedException {
         landingRequestTime = System.currentTimeMillis();
         Logger.log("Requesting landing permission...");
-        atc.requestLanding(getName(), isEmergency);
+        atc.requestLanding(this, isEmergency);  // Updated: pass 'this' instead of name and lock
         
         // Wait for permission (will be notified by ATC)
-        synchronized (getName().intern()) {
-            getName().intern().wait();
+        synchronized (atcLock) {
+            atcLock.wait();
         }
     }
 
@@ -129,7 +131,7 @@ public class Plane extends Thread {
         Thread refuelThread = new Thread(() -> {
             try {
                 Logger.log("Request for refuelling");
-                refuellingTruck.requestRefuelling(getName());
+                refuellingTruck.requestRefuelling(this);  // Pass 'this' Plane object
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -140,9 +142,9 @@ public class Plane extends Thread {
         // Wait for disembarkation to complete before cleaning
         disembarkPassenger.join();
 
-        // Sequential cabin operations
-        cleaningCrews[gateIndex].cleanPlane(getName());
-        supplyCrews[gateIndex].supplyPlane(getName());
+        // Sequential cabin operations - pass 'this' Plane object
+        cleaningCrews[gateIndex].cleanPlane(this);
+        supplyCrews[gateIndex].supplyPlane(this);
 
         // Wait for refuelling to complete before boarding
         refuelThread.join();
@@ -155,11 +157,11 @@ public class Plane extends Thread {
     private void takeoff() throws InterruptedException {
         takeoffRequestTime = System.currentTimeMillis();
         Logger.log("Requesting takeoff permission");
-        atc.requestTakeoff(getName());
+        atc.requestTakeoff(this);  // Updated: pass 'this' instead of name and lock
         
         // Wait for permission from ATC
-        synchronized (getName().intern()) {
-            getName().intern().wait();
+        synchronized (atcLock) {
+            atcLock.wait();
         }
 
         // ATC has granted permission, now acquire runway for takeoff
@@ -172,7 +174,7 @@ public class Plane extends Thread {
         long waitTime = System.currentTimeMillis() - takeoffRequestTime;
         Statistics.recordTakeoffWait(waitTime);
         
-        atc.planeLeftGround();
+        atc.planeLeftGround(getName());  // Updated: pass plane name
         Logger.log("Successfully departed");
     }
 
@@ -182,5 +184,17 @@ public class Plane extends Thread {
         }
         this.isEmergency = (level > 1);
         setPriority(Thread.MIN_PRIORITY + level - 1);
+    }
+
+    // Method for ATC to notify this plane
+    public void grantATCPermission() {
+        synchronized (atcLock) {
+            atcLock.notifyAll();
+        }
+    }
+
+    // Getter for ATC lock - required by the new ATC class
+    public Object getATCLock() {
+        return atcLock;
     }
 }

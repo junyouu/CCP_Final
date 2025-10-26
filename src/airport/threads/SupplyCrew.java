@@ -16,7 +16,7 @@ import airport.utils.Logger;
 public class SupplyCrew extends Thread {
     private static final int SUPPLY_TIME = 3000; // 3 seconds to resupply
     private final int gateNumber;
-    private String currentPlane;
+    private Plane currentPlane;  // Changed from String to Plane object
     private volatile boolean isRunning;
     private final Object lock = new Object();
     private volatile boolean workCompleted = false;
@@ -37,17 +37,17 @@ public class SupplyCrew extends Thread {
                     }
                     if (!isRunning) break;
                     
-                    String planeName = currentPlane;
-                    Logger.log("Starting to resupply " + planeName);
+                    Plane plane = currentPlane;
+                    Logger.log("Starting to resupply " + plane.getName());
                     Thread.sleep(SUPPLY_TIME);
-                    Logger.log("Finished resupplying " + planeName);
+                    Logger.log("Finished resupplying " + plane.getName());
                     
                     workCompleted = true;
                     currentPlane = null;
                     
-                    // Notify the plane that supply is complete
-                    synchronized (planeName.intern()) {
-                        planeName.intern().notifyAll();
+                    // Notify the plane using the actual Plane object
+                    synchronized (plane) {
+                        plane.notifyAll();
                     }
                 }
             } catch (InterruptedException e) {
@@ -57,19 +57,24 @@ public class SupplyCrew extends Thread {
         }
     }
 
-    public void supplyPlane(String planeName) throws InterruptedException {
+    public void supplyPlane(Plane plane) throws InterruptedException {
         synchronized (lock) {
             workCompleted = false;
-            currentPlane = planeName;
+            currentPlane = plane;
             lock.notifyAll();
         }
         
-        // Wait for supply to complete
-        synchronized (planeName.intern()) {
+        // Wait for supply to complete using the actual Plane object as lock
+        synchronized (plane) {
             while (!workCompleted) {
-                planeName.intern().wait();
+                plane.wait();
             }
         }
+    }
+
+    // Overloaded method for backward compatibility (if needed)
+    public void supplyPlane(String planeName) throws InterruptedException {
+        throw new UnsupportedOperationException("Please use supplyPlane(Plane plane) method instead");
     }
 
     public void shutdown() {

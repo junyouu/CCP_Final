@@ -32,18 +32,27 @@ public class AirTrafficControl extends Thread {
     private volatile boolean isRunning;
     private final Set<String> deniedMessages;
 
-    // Request class
+    // Request class - stores the actual Plane object
     private static class RunwayRequest {
-        String planeName;
+        Plane plane;  // Store the actual Plane object
         boolean isLanding; // true for landing, false for takeoff
         boolean isEmergency;
         long timestamp;
 
-        RunwayRequest(String planeName, boolean isLanding, boolean isEmergency) {
-            this.planeName = planeName;
+        RunwayRequest(Plane plane, boolean isLanding, boolean isEmergency) {
+            this.plane = plane;
             this.isLanding = isLanding;
             this.isEmergency = isEmergency;
             this.timestamp = System.currentTimeMillis();
+        }
+        
+        // Helper methods
+        String getPlaneName() {
+            return plane.getName();
+        }
+        
+        Object getPlaneLock() {
+            return plane.getATCLock();
         }
     }
 
@@ -79,9 +88,9 @@ public class AirTrafficControl extends Thread {
             RunwayRequest firstRequest = runwayQueue.peek();
             if (firstRequest != null) {
                 if (firstRequest.isLanding) {
-                    logDenial(firstRequest.planeName, "Landing denied for " + firstRequest.planeName + ", runway occupied.");
+                    logDenial(firstRequest.getPlaneName(), "Landing denied for " + firstRequest.getPlaneName() + ", runway occupied.");
                 } else {
-                    logDenial(firstRequest.planeName, "Takeoff denied for " + firstRequest.planeName + ", runway occupied.");
+                    logDenial(firstRequest.getPlaneName(), "Takeoff denied for " + firstRequest.getPlaneName() + ", runway occupied.");
                 }
             }
             return;
@@ -103,9 +112,9 @@ public class AirTrafficControl extends Thread {
                 } else {
                     // Log denial reason (only once per plane per reason)
                     if (planesOnGround.get() >= 3) {
-                        logDenial(request.planeName, "Landing denied for " + request.planeName + ", airport full.");
+                        logDenial(request.getPlaneName(), "Landing denied for " + request.getPlaneName() + ", airport full.");
                     } else if (findAvailableGate() == null) {
-                        logDenial(request.planeName, "Landing denied for " + request.planeName + ", no gates available.");
+                        logDenial(request.getPlaneName(), "Landing denied for " + request.getPlaneName() + ", no gates available.");
                     }
                 }
             } else {
@@ -136,7 +145,7 @@ public class AirTrafficControl extends Thread {
     private boolean canProcessTakeoffRequest(RunwayRequest request) {
         // Can take off if the plane is actually at a gate
         for (Gate gate : gates) {
-            if (request.planeName.equals(gate.getOccupiedBy())) {
+            if (request.getPlaneName().equals(gate.getOccupiedBy())) {
                 return true;
             }
         }
@@ -146,12 +155,17 @@ public class AirTrafficControl extends Thread {
     private void processLandingRequest(RunwayRequest request) {
         Gate availableGate = findAvailableGate();
         if (availableGate != null) {
-            Logger.log("Permission granted for " + request.planeName + " to land.");
-            Logger.log("Gate-" + availableGate.getGateNumber() + " assigned for " + request.planeName);
-            availableGate.occupy(request.planeName);
+            Logger.log("Permission granted for " + request.getPlaneName() + " to land.");
+            Logger.log("Gate-" + availableGate.getGateNumber() + " assigned for " + request.getPlaneName());
+            availableGate.occupy(request.getPlaneName());
             planesOnGround.incrementAndGet();
-            synchronized (request.planeName.intern()) {
-                request.planeName.intern().notifyAll();
+            
+            // Notify the plane using its dedicated lock
+            Object planeLock = request.getPlaneLock();
+            if (planeLock != null) {
+                synchronized (planeLock) {
+                    planeLock.notifyAll();
+                }
             }
         }
     }
@@ -160,17 +174,22 @@ public class AirTrafficControl extends Thread {
         // Find the gate this plane is occupying
         Gate occupiedGate = null;
         for (Gate gate : gates) {
-            if (request.planeName.equals(gate.getOccupiedBy())) {
+            if (request.getPlaneName().equals(gate.getOccupiedBy())) {
                 occupiedGate = gate;
                 break;
             }
         }
         
         if (occupiedGate != null) {
-            Logger.log("Permission granted for " + request.planeName + " to take off.");
+            Logger.log("Permission granted for " + request.getPlaneName() + " to take off.");
             occupiedGate.release();
-            synchronized (request.planeName.intern()) {
-                request.planeName.intern().notifyAll();
+            
+            // Notify the plane using its dedicated lock
+            Object planeLock = request.getPlaneLock();
+            if (planeLock != null) {
+                synchronized (planeLock) {
+                    planeLock.notifyAll();
+                }
             }
         }
     }
@@ -192,33 +211,39 @@ public class AirTrafficControl extends Thread {
         return null;
     }
 
-    public synchronized void requestLanding(String planeName, boolean isEmergency) {
+    // Only accept Plane objects - no backward compatibility
+    public synchronized void requestLanding(Plane plane, boolean isEmergency) {
+        String planeName = plane.getName();
+        
         if (isEmergency) {
             Logger.log("Emergency landing request from " + planeName);
             // Remove any existing request for this plane
-            runwayQueue.removeIf(req -> req.planeName.equals(planeName));
+            runwayQueue.removeIf(req -> req.getPlaneName().equals(planeName));
             // Add emergency request to front with early timestamp
-            RunwayRequest emergencyRequest = new RunwayRequest(planeName, true, true);
+            RunwayRequest emergencyRequest = new RunwayRequest(plane, true, true);
             emergencyRequest.timestamp = 0; // Highest priority
             ((LinkedList<RunwayRequest>) runwayQueue).addFirst(emergencyRequest);
         } else {
             // Check if not already in queue
             boolean alreadyInQueue = runwayQueue.stream()
-                .anyMatch(req -> req.planeName.equals(planeName) && req.isLanding);
+                .anyMatch(req -> req.getPlaneName().equals(planeName) && req.isLanding);
             if (!alreadyInQueue) {
                 // Always add to queue for proper runway management and processing order
-                runwayQueue.offer(new RunwayRequest(planeName, true, false));
+                runwayQueue.offer(new RunwayRequest(plane, true, false));
             }
         }
     }
 
-    public synchronized void requestTakeoff(String planeName) {
+    // Only accept Plane objects - no backward compatibility
+    public synchronized void requestTakeoff(Plane plane) {
+        String planeName = plane.getName();
+        
         // Check if not already in queue
         boolean alreadyInQueue = runwayQueue.stream()
-            .anyMatch(req -> req.planeName.equals(planeName) && !req.isLanding);
+            .anyMatch(req -> req.getPlaneName().equals(planeName) && !req.isLanding);
         if (!alreadyInQueue) {
             // Always add to queue for proper runway management and processing order
-            runwayQueue.offer(new RunwayRequest(planeName, false, false));
+            runwayQueue.offer(new RunwayRequest(plane, false, false));
         }
     }
 
@@ -231,7 +256,7 @@ public class AirTrafficControl extends Thread {
         return null;
     }
 
-    public void planeLeftGround() {
+    public void planeLeftGround(String planeName) {
         planesOnGround.decrementAndGet();
     }
 
@@ -265,4 +290,3 @@ public class AirTrafficControl extends Thread {
         return sb.toString();
     }
 }
-

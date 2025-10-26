@@ -20,6 +20,7 @@ import airport.threads.*;
 import airport.utils.Statistics;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 public class Main {
     private static final int NUM_GATES = 3;
@@ -113,8 +114,18 @@ public class Main {
     }
 
     private static void startPlanes(List<Plane> planes) {
+        Random random = new Random();
         for (Plane plane : planes) {
             plane.start();
+            try {
+                // Wait randomly between 0, 1, or 2 seconds before starting next plane
+                int delay = 1000;
+                // int delay = random.nextInt(3) * 1000; // 0, 1000, or 2000 milliseconds
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
     }
 
