@@ -21,14 +21,6 @@ import airport.utils.Statistics;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Main simulation class for Asia Pacific Airport
- * Simulates airport operations with:
- * - 1 runway
- * - 3 gates
- * - 6 planes
- * - Various service crews (cleaning, supply, refueling)
- */
 public class Main {
     private static final int NUM_GATES = 3;
     private static final int NUM_PLANES = 6;
@@ -166,24 +158,6 @@ public class Main {
         return passengerGroups;
     }
 
-
-//    // Add new method to start passenger groups
-//    private static void startPassengerGroups(EmbarkPassenger[] passengerGroups) {
-//        for (EmbarkPassenger passengerGroup : passengerGroups) {
-//            passengerGroup.start();
-//        }
-//    }
-//
-//    // Add new method to wait for passenger groups
-//    private static void waitForPassengerGroupsToComplete(EmbarkPassenger[] passengerGroups) {
-//        for (EmbarkPassenger passengerGroup : passengerGroups) {
-//            try {
-//                passengerGroup.join();
-//            } catch (InterruptedException e) {
-//                System.err.println("Error waiting for passenger group " + passengerGroup.getName() + ": " + e.getMessage());
-//            }
-//        }
-//    }
 }
 
 
